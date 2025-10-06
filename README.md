@@ -20,42 +20,50 @@ This plugin allows importing downloaded libraries from the platforms [Octopart](
 
 ## Installation
 
-Download the latest version and install it via **KiCad** -> **Plugin And Content Manager** -> **Install from File...** -> select **KiCad-Footprint-Importer.zip** and import.
+1. Download the latest release archive from the [GitHub releases page](https://github.com/RileyCornelius/KiCad-Footprint-Importer-Plugin/releases).
+2. In KiCad, open **Tools** → **Plugin and Content Manager**.
+3. Choose **Install from File...**, select `KiCad-Footprint-Importer.zip`, and confirm.
+4. Restart KiCad if prompted.
 
-## Use of the application
+## Quick start
 
-Open the dialog from either the **PCB Editor** via **Tools** → **External Plugins** → **Footprint Importer**.
+1. Launch the plugin from the **PCB Editor** via **Tools** → **External Plugins** → **Footprint Importer**.
+2. Point the **Folder of the library to import** to where you keep downloaded vendor archives.
+3. Click **Import from Folder** to pull in every ZIP, or drag individual archives onto the log window for a one-off import.
 
-![Screenshot_GUI](doc/2025-10-06 00_55_42-FootprintImporter.png)
+
+![Screenshot_GUI](doc/2025-10-06-FootprintImporter.png)
+
+## Usage
 
 ### Importing download archives
 
-1. Configure the **Folder of the library to import** to point at your download directory.
-2. Pick a destination in **Library save location** or switch to the local project mode (see below).
-3. Click **Import from Folder** to process every ZIP file in the source directory. The status window logs each imported component.
-4. Alternatively, drag one or more ZIP archives directly into the log window for an immediate one-off import—no folder polling required.
+1. Configure the **Folder of the library to import** to match your download directory.
+2. Pick a destination under **Library save location** or switch to local-project mode (see below).
+3. Click **Import from Folder** to process the directory. The status window logs each imported component.
+4. Alternatively, drag one or more ZIP archives into the log window for immediate processing.
 
 ### Importing a single EasyEDA / LCSC component
 
 Use the **Import from LCSC** button to fetch a part on demand:
 
 1. Enter an LCSC part number (for example `C2040`).
-2. Choose whether to overwrite existing items.
-3. Press the button or hit <kbd>Enter</kbd>. The importer will download symbols, footprints, and available 3D models using `easyeda2kicad.py`.
+2. Toggle **Overwrite existing** if you want to refresh an earlier download.
+3. Press **Import from LCSC** or hit <kbd>Enter</kbd>. The importer downloads symbols, footprints, and 3D models using `easyeda2kicad.py`.
 
-### Choosing where the libraries are stored
+### Choosing where libraries are stored
 
-- Leave **Save local, in the project folder** unchecked to keep a global library in the directory configured under **Library save location** (default: `~/KiCad`).
-- Enable the checkbox to write into the currently opened KiCad project. The plugin stores everything relative to `${KIPRJMOD}` and honours an optional subfolder name.
-- Changing modes updates the status log so you can confirm the resolved path before importing.
+- Leave **Save local, in the project folder** unchecked to maintain a global library under **Library save location** (default: `~/KiCad`).
+- Enable the checkbox to write into the active KiCad project. The plugin stores everything relative to `${KIPRJMOD}` and honours an optional subfolder.
+- The status log reports the resolved path each time you switch modes.
 
 ### Customising library names
 
-Enable **Use single library name** when you want every vendor part to land in one consolidated library. Supply any name (e.g. `VendorParts`) and the importer will re-use it for symbols, footprints, and 3D models.
+Enable **Use single library name** when you want every vendor part to land in one consolidated library. Provide the desired name (for example `VendorParts`) and the importer reuses it for symbols, footprints, and 3D models.
 
 ### After each import
 
-The plugin validates your KiCad setup and, when permitted, automatically adds the `${KICAD_3RD_PARTY}` environment variable and missing symbol/footprint libraries. Any required actions are printed in the log and shown in a confirmation dialog so that you can apply the changes immediately.
+The plugin validates your KiCad setup and, when permitted, automatically adds the `${KICAD_3RD_PARTY}` environment variable and registers missing symbol/footprint libraries. Required actions appear in the log and in a confirmation dialog so you can apply them immediately.
 
 ## Including the imported libraries in KiCad
 When you confirm the automatic setup prompt after an import, the plugin updates `${KICAD_3RD_PARTY}` and registers the generated symbol and footprint libraries for you (a KiCad restart is required). The steps below show how to perform the same configuration manually or how to double-check the result.
@@ -84,7 +92,6 @@ When you confirm the automatic setup prompt after an import, the plugin updates 
 |:heavy_check_mark: |EasyEDA        | ${KICAD_3RD_PARTY}/EasyEDA.pretty       | KiCad         |
 
 > **Tip:** When the local project mode is active, the plugin replaces `${KICAD_3RD_PARTY}` with `${KIPRJMOD}` (plus your optional subfolder). The same entries appear under the project-specific library tables inside KiCad.
-
 
 ## Many thanks to
 
