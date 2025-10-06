@@ -10,8 +10,12 @@ class ConfigHandler:
         self.config_is_set = False
 
         self.defaults = {
-            "SRC_PATH": str(Path.home() / "Downloads"),
-            "DEST_PATH": str(Path.home() / "KiCad"),
+            "src_path": str(Path.home() / "Downloads"),
+            "dest_path": str(Path.home() / "KiCad"),
+            "local_lib_enabled": "True",
+            "local_lib_subfolder": "Lib",
+            "custom_lib_enabled": "True",
+            "custom_lib_name": "Custom",
         }
 
         try:
@@ -46,17 +50,51 @@ class ConfigHandler:
         self.config_is_set = False
 
     def get_SRC_PATH(self):
-        return self.config["config"]["SRC_PATH"]
+        return self.config["config"]["src_path"]
 
     def set_SRC_PATH(self, var):
-        self.config["config"]["SRC_PATH"] = var
+        self.config["config"]["src_path"] = var
         self.save_config()
 
     def get_DEST_PATH(self):
-        return self.config["config"]["DEST_PATH"]
+        return self.config["config"]["dest_path"]
 
     def set_DEST_PATH(self, var):
-        self.config["config"]["DEST_PATH"] = var
+        self.config["config"]["dest_path"] = var
+        self.save_config()
+
+    def get_LOCAL_LIB_ENABLED(self):
+        try:
+            return self.config.getboolean("config", "local_lib_enabled")
+        except (ValueError, KeyError):
+            return False
+
+    def set_LOCAL_LIB_ENABLED(self, value):
+        self.config["config"]["local_lib_enabled"] = "True" if value else "False"
+        self.save_config()
+
+    def get_LOCAL_LIB_SUBFOLDER(self):
+        return self.config["config"].get("local_lib_subfolder", "")
+
+    def set_LOCAL_LIB_SUBFOLDER(self, value):
+        self.config["config"]["local_lib_subfolder"] = value
+        self.save_config()
+
+    def get_CUSTOM_LIB_ENABLED(self):
+        try:
+            return self.config.getboolean("config", "custom_lib_enabled")
+        except (ValueError, KeyError):
+            return False
+
+    def set_CUSTOM_LIB_ENABLED(self, value):
+        self.config["config"]["custom_lib_enabled"] = "True" if value else "False"
+        self.save_config()
+
+    def get_CUSTOM_LIB_NAME(self):
+        return self.config["config"].get("custom_lib_name", "")
+
+    def set_CUSTOM_LIB_NAME(self, value):
+        self.config["config"]["custom_lib_name"] = value
         self.save_config()
 
     def get_value(self, key, section="config"):

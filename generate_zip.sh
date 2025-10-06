@@ -1,7 +1,9 @@
 #!/bin/bash
 
+outputName="KiCad-Footprint-Importer.zip"
+
 # Clean up old ZIP
-rm -f Import-LIB-KiCad-Plugin.zip
+rm -f "$outputName"
 
 # Update metadata version
 mv metadata.json metadata_.json
@@ -76,7 +78,7 @@ find "$build_dir" -name "*.svg" -delete 2>/dev/null
 
 # Create ZIP from clean build directory
 echo "Creating ZIP file..."
-zip_target="$(pwd)/Import-LIB-KiCad-Plugin.zip"
+zip_target="$(pwd)/$outputName"
 cd "$build_dir"
 zip -r "$zip_target" . -x "*.pyc" "*/__pycache__/*"
 cd - > /dev/null
@@ -91,14 +93,14 @@ rm -rf "$temp_dir"
 # Show what's included
 echo ""
 echo "Package contents:"
-if [[ -f "Import-LIB-KiCad-Plugin.zip" ]]; then
-    unzip -l Import-LIB-KiCad-Plugin.zip
+if [[ -f "$outputName" ]]; then
+    unzip -l "$outputName"
     echo "..."
-    total_files=$(unzip -l Import-LIB-KiCad-Plugin.zip | tail -1 | awk '{print $2}')
+    total_files=$(unzip -l "$outputName" | tail -1 | awk '{print $2}')
     echo "Total files: $total_files"
     
     # Show ZIP size
-    zip_size=$(ls -lh Import-LIB-KiCad-Plugin.zip | awk '{print $5}')
+    zip_size=$(ls -lh "$outputName" | awk '{print $5}')
     echo "ZIP size: $zip_size"
 else
     echo "Error: ZIP file not found after creation"
@@ -106,4 +108,4 @@ else
     ls -la *.zip 2>/dev/null || echo "No ZIP files found"
 fi
 
-echo "ZIP file created: $(realpath Import-LIB-KiCad-Plugin.zip)"
+echo "ZIP file created: $(realpath "$outputName")"

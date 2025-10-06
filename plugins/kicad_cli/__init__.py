@@ -1,11 +1,9 @@
 import subprocess
-import sys
 import logging
 import shutil
 import os
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
-import tempfile
 
 
 @dataclass
@@ -24,6 +22,24 @@ class kicad_cli:
         """Initialize the KiCad CLI wrapper with logger and command discovery."""
         self.logger: logging.Logger = logging.getLogger(__name__)
         self.kicad_cmd: str = self._find_kicad_cli()
+        self._exists_cache: Optional[bool] = None
+
+    def _subprocess_kwargs(self) -> dict:
+        """Return platform-specific kwargs that suppress console windows."""
+        kwargs: dict = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+        }
+
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            kwargs["startupinfo"] = startupinfo
+            if hasattr(subprocess, "CREATE_NO_WINDOW"):
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        return kwargs
 
     def _find_kicad_cli(self) -> str:
         """Find KiCad CLI command across different platforms."""
@@ -39,17 +55,11 @@ class kicad_cli:
         self.logger.info(f"Executing: {' '.join(full_command)}")
 
         try:
-            creation_flags = (
-                subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            )
-
+            kwargs = self._subprocess_kwargs()
             result = subprocess.run(
                 full_command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
                 timeout=30,
-                creationflags=creation_flags,
+                **kwargs,
             )
 
             success = result.returncode == 0
@@ -95,38 +105,40 @@ class kicad_cli:
     def exists(self) -> bool:
         """Check if KiCad CLI exists and meets minimum version requirements."""
         try:
-            creation_flags = (
-                subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            )
+            if self._exists_cache is not None:
+                return self._exists_cache
 
+            kwargs = self._subprocess_kwargs()
             result = subprocess.run(
                 [self.kicad_cmd, "--version"],
                 check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
                 timeout=10,
-                creationflags=creation_flags,
+                **kwargs,
             )
             version: str = result.stdout.strip()
             min_version: str = "8.0.4"
             kicad_vers: Tuple[int, int, int] = self.version_to_tuple(version)
 
-            self.logger.info(f"KiCad Version: {version}")
             if not kicad_vers or kicad_vers < self.version_to_tuple(min_version):
+                self.logger.warning(f"KiCad Version: {version}")
                 self.logger.warning(f"Minimum required KiCad version is: {min_version}")
-                return False
+                self._exists_cache = False
             else:
-                return True
+                self._exists_cache = True
+
+            return self._exists_cache
 
         except subprocess.TimeoutExpired:
             self.logger.error("Timeout checking KiCad version")
+            self._exists_cache = False
             return False
         except (subprocess.CalledProcessError, FileNotFoundError):
             self.logger.error("kicad-cli does not exist or is not accessible")
+            self._exists_cache = False
             return False
         except Exception as e:
             self.logger.error(f"Unexpected error checking KiCad: {e}")
+            self._exists_cache = False
             return False
 
     def _is_valid_symbol_file(self, filepath: str) -> bool:
@@ -260,96 +272,6 @@ class kicad_cli:
             error_msg = f"Unexpected error during upgrade: {e}"
             self.logger.error(error_msg)
             return CommandResult(False, "", str(e), -1, error_msg)
-
-    def upgrade_sym_lib_from_string(
-        self, symbol_lib_content: str, force: bool = True
-    ) -> Tuple[bool, str, str]:
-        """
-        Upgrade a KiCad symbol library from string content.
-
-        Args:
-            symbol_lib_content: String content of the symbol library
-            force: Whether to force the upgrade operation
-
-        Returns:
-            Tuple of (success: bool, upgraded_content: str, error_message: str)
-            - success: True if upgrade was successful
-            - upgraded_content: The upgraded symbol library content (empty if failed)
-            - error_message: Error message if upgrade failed (empty if successful)
-        """
-        if not symbol_lib_content.strip():
-            error_msg = "Empty symbol library content provided"
-            self.logger.error(error_msg)
-            return False, "", error_msg
-
-        content_start = symbol_lib_content.strip()
-        is_legacy_lib = content_start.startswith("EESchema-LIBRARY")
-        is_modern_lib = content_start.startswith("(kicad_symbol_lib")
-
-        if not (is_legacy_lib or is_modern_lib):
-            error_msg = "Content does not appear to be a valid KiCad symbol library"
-            self.logger.error(error_msg)
-            return False, "", error_msg
-
-        file_extension = ".lib" if is_legacy_lib else ".kicad_sym"
-
-        try:
-            input_temp_dir = tempfile.mkdtemp(prefix="kicad_input_")
-            output_temp_dir = tempfile.mkdtemp(prefix="kicad_output_")
-
-            input_temp_path = os.path.join(input_temp_dir, f"input{file_extension}")
-            output_temp_path = os.path.join(output_temp_dir, "output.kicad_sym")
-
-            with open(input_temp_path, "w", encoding="utf-8") as f:
-                f.write(symbol_lib_content)
-
-            try:
-                self.logger.info(
-                    f"Upgrading symbol library from string (temp files: {input_temp_path} -> {output_temp_path})"
-                )
-
-                result = self.upgrade_sym_lib(
-                    input_temp_path, output_temp_path, force=force
-                )
-
-                if result.success:
-                    try:
-                        with open(output_temp_path, "r", encoding="utf-8") as f:
-                            upgraded_content = f.read()
-
-                        self.logger.info(
-                            "Symbol library successfully upgraded from string"
-                        )
-                        return True, upgraded_content, ""
-
-                    except Exception as e:
-                        error_msg = f"Failed to read upgraded content: {e}"
-                        self.logger.error(error_msg)
-                        return False, "", error_msg
-                else:
-                    error_msg = f"Upgrade failed: {result.message}"
-                    if result.stderr:
-                        error_msg += f" - {result.stderr}"
-                    self.logger.error(error_msg)
-                    return False, "", error_msg
-
-            finally:
-                for temp_dir in [input_temp_dir, output_temp_dir]:
-                    try:
-                        if os.path.exists(temp_dir):
-                            shutil.rmtree(temp_dir)
-                            self.logger.debug(
-                                f"Cleaned up temporary directory: {temp_dir}"
-                            )
-                    except Exception as cleanup_error:
-                        self.logger.warning(
-                            f"Failed to cleanup temporary directory {temp_dir}: {cleanup_error}"
-                        )
-
-        except Exception as e:
-            error_msg = f"Failed to create temporary files: {e}"
-            self.logger.error(error_msg)
-            return False, "", error_msg
 
     def upgrade_footprint_lib(
         self,

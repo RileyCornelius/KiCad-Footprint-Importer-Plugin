@@ -8,7 +8,6 @@
 import zipfile
 import tempfile
 import shutil
-import sys
 import logging
 from enum import Enum
 from typing import Tuple, Union, List, Dict, Any, Optional
@@ -16,13 +15,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Setup kiutils path using sys.path manipulation like KiCad_Settings
-current_dir = Path(__file__).resolve().parent
-kiutils_src = current_dir.parent / "kiutils" / "src"
-if str(kiutils_src) not in sys.path:
-    sys.path.insert(0, str(kiutils_src))
-
-# Import kiutils modules directly
 from kiutils.symbol import SymbolLib, Property, Effects
 from kiutils.items.common import Position, Font
 
@@ -31,17 +23,33 @@ try:
 except ImportError:
     from footprint_model_parser import FootprintModelParser
 
-try:
-    from ..kicad_cli import kicad_cli
-except ImportError:
-    from kicad_cli import kicad_cli
+
+logger = logging.getLogger(__name__)
 
 try:
-    cli = kicad_cli()
-    logger.info("✓ kicad_cli initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize kicad_cli: {e}")
+    from ..kicad_cli import kicad_cli
+
+    logger.debug("Imported kicad_cli using relative import")
+except ImportError:
+    try:
+        from kicad_cli import kicad_cli
+
+        logger.debug("Imported kicad_cli using absolute import")
+    except ImportError:
+        logger.warning("kicad_cli module not available")
+        kicad_cli = None
+
+# Initialize CLI if available
+if kicad_cli and callable(kicad_cli):
+    try:
+        cli = kicad_cli()
+        logger.info("✓ kicad_cli initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize kicad_cli: {e}")
+        cli = None
+else:
     cli = None
+    logger.warning("kicad_cli not available or not callable")
 
 
 class Modification(Enum):
@@ -112,6 +120,7 @@ class LibImporter:
         self.model_skipped = False
         self.footprint_name = None
         self.footprint_parser = FootprintModelParser()
+        self.library_override: Optional[str] = None
 
     def set_DEST_PATH(self, DEST_PATH_=Path.home() / "KiCad"):
         self.DEST_PATH = Path(DEST_PATH_)
@@ -125,6 +134,16 @@ class LibImporter:
         if original_name != name:
             logger.debug(f"Cleaned name: {original_name} -> {name}")
         return name
+
+    def set_library_override(self, name: Optional[str]) -> None:
+        if name:
+            cleaned = self.cleanName(name)
+            self.library_override = cleaned if cleaned else None
+        else:
+            self.library_override = None
+
+    def get_library_prefix(self, remote_type: REMOTE_TYPES) -> str:
+        return self.library_override or remote_type.name
 
     def identify_remote_type(
         self, zf: zipfile.ZipFile
@@ -432,8 +451,9 @@ class LibImporter:
         if not footprint_file.exists():
             return False
 
+        library_prefix = self.get_library_prefix(remote_type)
         model_path = (
-            f"{self.KICAD_3RD_PARTY_LINK}/{remote_type.name}.3dshapes/{model_name}"
+            f"{self.KICAD_3RD_PARTY_LINK}/{library_prefix}.3dshapes/{model_name}"
         )
 
         try:
@@ -470,17 +490,19 @@ class LibImporter:
             if footprint_prop:
                 # Update the footprint reference with library prefix
                 old_value = footprint_prop.value
+                library_prefix = self.get_library_prefix(remote_type)
                 footprint_prop.value = (
-                    f"{remote_type.name}:{self.cleanName(footprint_name)}"
+                    f"{library_prefix}:{self.cleanName(footprint_name)}"
                 )
                 logger.debug(
                     f"Updated footprint property: {old_value} -> {footprint_prop.value}"
                 )
             else:
                 # Add footprint property if it doesn't exist
+                library_prefix = self.get_library_prefix(remote_type)
                 new_prop = Property(
                     key="Footprint",
-                    value=f"{remote_type.name}:{self.cleanName(footprint_name)}",
+                    value=f"{library_prefix}:{self.cleanName(footprint_name)}",
                     id=0,  # Will be assigned by kiutils
                     position=Position(0, 0),
                     effects=Effects(
@@ -518,7 +540,8 @@ class LibImporter:
         try:
             # 1. Save symbol library with atomic write
             if symbol_lib:
-                lib_file_path = self.DEST_PATH / f"{remote_type.name}.kicad_sym"
+                library_prefix = self.get_library_prefix(remote_type)
+                lib_file_path = self.DEST_PATH / f"{library_prefix}.kicad_sym"
 
                 # Create backup if file exists
                 backup_path = None
@@ -614,7 +637,8 @@ class LibImporter:
 
             # 3. Save 3D model
             if model_path:
-                model_dir = self.DEST_PATH / f"{remote_type.name}.3dshapes"
+                library_prefix = self.get_library_prefix(remote_type)
+                model_dir = self.DEST_PATH / f"{library_prefix}.3dshapes"
                 if not model_dir.exists():
                     model_dir.mkdir(parents=True, exist_ok=True)
                     modified_objects.append(model_dir, Modification.MKDIR)
@@ -678,7 +702,8 @@ class LibImporter:
                         )
 
             # Clean up any remaining temporary files
-            for pattern in [f"{remote_type.name}.kicad_sym.tmp", "*.tmp"]:
+            library_prefix = self.get_library_prefix(remote_type)
+            for pattern in [f"{library_prefix}.kicad_sym.tmp", "*.tmp"]:
                 for temp_file in self.DEST_PATH.glob(pattern):
                     if temp_file.exists():
                         temp_file.unlink(missing_ok=True)
@@ -729,7 +754,8 @@ class LibImporter:
                 # Handle footprint - extract directly to destination
                 footprint_file_path = None
                 if files["footprint"]:
-                    footprint_dir = self.DEST_PATH / f"{remote_type.name}.pretty"
+                    library_prefix = self.get_library_prefix(remote_type)
+                    footprint_dir = self.DEST_PATH / f"{library_prefix}.pretty"
                     if not footprint_dir.exists():
                         footprint_dir.mkdir(parents=True, exist_ok=True)
                         modified_objects.append(footprint_dir, Modification.MKDIR)

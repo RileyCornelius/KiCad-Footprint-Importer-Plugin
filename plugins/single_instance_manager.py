@@ -3,11 +3,11 @@ Single Instance Manager with IPC communication for KiCad Plugin.
 Handles ensuring only one instance runs and brings existing window to foreground.
 """
 
-import json
-import logging
 import socket
 import threading
-from typing import Any, Optional
+import json
+import logging
+from typing import Optional, Any
 
 try:
     import wx
@@ -57,55 +57,32 @@ class SingleInstanceManager:
         """Start IPC server to listen for commands."""
         self.frontend_instance = frontend_instance
 
-        # Try to find an available port if default is busy
-        for port_attempt in range(self.port, self.port + 3):
-            try:
-                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                # Also set SO_REUSEPORT on systems that support it
-                try:
-                    self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-                except (AttributeError, OSError):
-                    # SO_REUSEPORT not available on this system (e.g., Windows)
-                    pass
-                self.socket.bind(("127.0.0.1", port_attempt))
-                self.socket.listen(1)
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.bind(("127.0.0.1", self.port))
+            self.socket.listen(1)
+            self.running = True
 
-                # Update port if we had to use a different one
-                if port_attempt != self.port:
-                    logging.info(
-                        f"Port {self.port} was busy, using {port_attempt} instead"
-                    )
-                    self.port = port_attempt
+            self.server_thread = threading.Thread(target=self._server_loop, daemon=True)
+            self.server_thread.start()
 
-                self.running = True
-                break
+            logging.info(f"IPC server started on port {self.port}")
+            return True
 
-            except socket.error as e:
-                if self.socket:
-                    self.socket.close()
-                    self.socket = None
-                if port_attempt == self.port + 2:  # Last attempt
-                    logging.error(f"Failed to start IPC server on any port: {e}")
-                    return False
-                continue
-
-        self.server_thread = threading.Thread(target=self._server_loop, daemon=True)
-        self.server_thread.start()
-
-        logging.info(f"IPC server started on port {self.port}")
-        return True
+        except socket.error as e:
+            logging.error(f"Failed to start IPC server: {e}")
+            return False
 
     def _server_loop(self) -> None:
         """Main server loop to handle incoming commands."""
         while self.running:
-            client_socket = None
             try:
                 self.socket.settimeout(1.0)  # Add timeout to server socket
                 client_socket, addr = self.socket.accept()
                 client_socket.settimeout(5.0)
 
-                data = client_socket.recv(1024).decode("utf-8", errors="ignore")
+                data = client_socket.recv(1024).decode("utf-8")
                 if data:
                     try:
                         message = json.loads(data)
@@ -116,19 +93,14 @@ class SingleInstanceManager:
                         logging.warning("Received invalid JSON data")
                         client_socket.send(b"ERROR")
 
+                client_socket.close()
+
             except socket.timeout:
                 continue
             except socket.error as e:
                 if self.running:
                     logging.error(f"Server socket error: {e}")
                 break
-            finally:
-                # Always close client socket
-                if client_socket:
-                    try:
-                        client_socket.close()
-                    except:
-                        pass
 
     def _handle_command(self, message: dict) -> None:
         """Handle incoming commands."""
@@ -136,11 +108,8 @@ class SingleInstanceManager:
 
         if command == "focus" and self.frontend_instance:
             if wx:
-                try:
-                    wx.CallAfter(self._bring_to_foreground)
-                    logging.info("Scheduled window focus command")
-                except RuntimeError as e:
-                    logging.warning(f"wx.CallAfter failed (app may be closing): {e}")
+                wx.CallAfter(self._bring_to_foreground)
+                logging.info("Scheduled window focus command")
             else:
                 logging.warning("wx not available - cannot bring window to foreground")
 
@@ -157,14 +126,6 @@ class SingleInstanceManager:
                     "Frontend instance has no IsShown method - window may be destroyed"
                 )
                 self.frontend_instance = None
-                return
-
-            # Additional safety check for destroyed window
-            if (
-                hasattr(self.frontend_instance, "IsBeingDeleted")
-                and self.frontend_instance.IsBeingDeleted()
-            ):
-                logging.warning("Frontend instance is being deleted - skipping focus")
                 return
 
             # Handle hidden window (running in background)
@@ -219,40 +180,20 @@ class SingleInstanceManager:
         return False
 
     def stop_server(self) -> None:
-        """Stop the IPC server with robust cleanup."""
-        # Prevent multiple stops
-        if hasattr(self, "_stopped") and self._stopped:
-            return
-
-        if hasattr(self, "_stopping") and self._stopping:
-            return
-
-        self._stopping = True
+        """Stop the IPC server."""
         logging.info("Stopping IPC server")
         self.running = False
 
-        # Close socket first to stop accepting new connections
         if self.socket:
-            try:
-                self.socket.shutdown(socket.SHUT_RDWR)
-            except Exception:
-                pass  # Socket might already be closed
             try:
                 self.socket.close()
             except Exception as e:
                 logging.debug(f"Error closing socket: {e}")
-            finally:
-                self.socket = None
 
-        # Force stop server thread with longer timeout
         if self.server_thread and self.server_thread.is_alive():
-            self.server_thread.join(timeout=5.0)
+            self.server_thread.join(timeout=2.0)
             if self.server_thread.is_alive():
-                logging.warning("Server thread did not stop cleanly within 5 seconds")
-                # Force cleanup thread reference
-                self.server_thread = None
+                logging.warning("Server thread did not stop cleanly")
 
         self.unregister_frontend()
-        self._stopping = False
-        self._stopped = True
         logging.info("IPC server stopped")
